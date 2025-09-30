@@ -29,6 +29,11 @@ function SideBar() {
         onSelect={handleSelect}
       >
         <Nav.Item>
+          <Nav.Link eventKey="automation-root" as={Link} to="/automation">
+            🗂️ Automation
+          </Nav.Link>
+        </Nav.Item>
+        <Nav.Item>
           <Nav.Link eventKey="dashboard" as={Link} to="/dashboard">
             📊 Dashboard
           </Nav.Link>
@@ -59,8 +64,18 @@ function SideBar() {
         </Nav.Item>
         
         <Nav.Item>
-          <Nav.Link eventKey="automation" as={Link} to="/automation/signin">
-            🤖 Automation Sign-In
+          <Nav.Link eventKey="automation-signin" as={Link} to="/automation/signin">
+            🔐 Automation Sign-In
+          </Nav.Link>
+        </Nav.Item>
+        <Nav.Item>
+          <Nav.Link eventKey="automation-signup" as={Link} to="/automation/signup">
+            📝 Automation Sign-Up
+          </Nav.Link>
+        </Nav.Item>
+        <Nav.Item>
+          <Nav.Link eventKey="automation-forgot" as={Link} to="/automation/forgot">
+            🔄 Forgot Password
           </Nav.Link>
         </Nav.Item>
         

@@ -21,7 +21,6 @@ def download_report(report_id, email, password, retries=3, delay=5):
             "email": email,
             "password": password
     }
-    
     try:
         response = session.post(LOGIN_URL, json=payload, headers=HEADERS)
         response.raise_for_status()

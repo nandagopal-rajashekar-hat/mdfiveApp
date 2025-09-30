@@ -195,9 +195,9 @@ finally:
 
 if __name__ == '__main__':
     print("🚀 Starting Simple Automation Flask Server...")
-    print("📍 Server will be available at: http://localhost:5001")
+    print("📍 Server will be available at: http://localhost:5000")
     print("🔗 API endpoints:")
     print("   GET  /api/health - Health check")
     print("   POST /api/automation/signin - Execute sign-in automation")
     print("=" * 50)
-    app.run(debug=True, host='127.0.0.1', port=5001)
+    app.run(debug=True, host='127.0.0.1', port=5000)

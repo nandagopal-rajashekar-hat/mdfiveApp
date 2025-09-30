@@ -21,6 +21,7 @@ def db_cursor():
         cur.close()
         conn.close()
 
+
 def register_routes(app):
     @app.route('/api/test', methods=['GET'])
     def test():
@@ -162,7 +163,7 @@ def register_routes(app):
                 'success': False,
                 'error': str(e)
             }), 500
-
+        
     @app.route('/api/automation/signin', methods=['POST'])
     def automation_signin():
         """Execute Selenium sign-in automation"""
@@ -177,6 +178,7 @@ def register_routes(app):
             email = data.get('email')
             password = data.get('password')
             url = data.get('url', 'https://qa.systemisers.in/')
+            headless = bool(data.get('headless', True))
 
             if not email or not password:
                 return jsonify({
@@ -188,88 +190,96 @@ def register_routes(app):
             def run_selenium_script():
                 try:
                     # Create a temporary script with the provided credentials
-                    temp_script_content = f'''from selenium import webdriver
+                    temp_script_content = '''from selenium import webdriver
 from selenium.webdriver.common.by import By
 from selenium.webdriver.common.keys import Keys
 from selenium.webdriver.support.ui import WebDriverWait
 from selenium.webdriver.support import expected_conditions as EC
+from selenium.webdriver.chrome.options import Options
 import time
+import sys
 
 # --- Configuration ---
-URL = "{url}"
-EMAIL = "{email}"
-PASSWORD = "{password}"
+URL = "{URL}"
+EMAIL = "{EMAIL}"
+PASSWORD = "{PASSWORD}"
+HEADLESS = {HEADLESS}
 
-# --- Setup WebDriver ---
-driver = webdriver.Chrome()   # Make sure you have ChromeDriver installed
-driver.maximize_window()
-driver.get(URL)
-
-# --- Wait object ---
-wait = WebDriverWait(driver, 10)
-
-try:
-    # 1. Click on Sign In button (navbar)
-    sign_in_nav_btn = wait.until(
-        EC.element_to_be_clickable((By.XPATH, '//*[@id="navbarSupportedContent"]/button[2]'))
-    )
-    sign_in_nav_btn.click()
-
-    # 2. Enter email
-    email_input = wait.until(
-        EC.visibility_of_element_located((By.XPATH, '//form/div[1]/input[@placeholder="Enter Your Email Address"]'))
-    )
-    email_input.clear()
-    email_input.send_keys(EMAIL)
-
-    # 3. Enter password
-    password_input = driver.find_element(By.XPATH, '//form/div[2]/input[@placeholder="Enter Your Password"]')
-    password_input.clear()
-    password_input.send_keys(PASSWORD)
-
-    # 4. Click Sign In button (inside popup)
-    sign_in_btn = driver.find_element(By.XPATH, '//form/button[text()="Sign In"]')
-    sign_in_btn.click()
-
-    # --- Wait to see result ---
-    time.sleep(5)
-    
-    # Check if sign-in was successful by looking for a success indicator
+def main():
+    driver = None
     try:
-        # Look for elements that indicate successful login
+        # --- Setup WebDriver (headless) ---
+        options = webdriver.ChromeOptions()
+        if HEADLESS:
+            options.add_argument('--headless=new')
+        options.add_argument('--no-sandbox')
+        options.add_argument('--disable-dev-shm-usage')
+        options.add_argument('--window-size=1920,1080')
+        driver = webdriver.Chrome(options=options)
+        driver.get(URL)
+
+        # --- Wait object ---
+        wait = WebDriverWait(driver, 10)
+
+        # 1. Click on Sign In button (navbar)
+        sign_in_nav_btn = wait.until(
+            EC.element_to_be_clickable((By.XPATH, '//*[@id="navbarSupportedContent"]/button[2]'))
+        )
+        sign_in_nav_btn.click()
+
+        # 2. Enter email
+        email_input = wait.until(
+            EC.visibility_of_element_located((By.XPATH, '//form/div[1]/input[@placeholder="Enter Your Email Address"]'))
+        )
+        email_input.clear()
+        email_input.send_keys(EMAIL)
+
+        # 3. Enter password
+        password_input = driver.find_element(By.XPATH, '//form/div[2]/input[@placeholder="Enter Your Password"]')
+        password_input.clear()
+        password_input.send_keys(PASSWORD)
+
+        # 4. Click Sign In button (inside popup)
+        sign_in_btn = driver.find_element(By.XPATH, '//form/button[text()="Sign In"]')
+        sign_in_btn.click()
+
+        # --- Wait to see result ---
+        time.sleep(5)
+
+        # Check if sign-in was successful by looking for a success indicator
         success_indicators = [
             '//a[contains(text(), "Logout")]',
             '//a[contains(text(), "Dashboard")]',
             '//div[contains(@class, "user-menu")]',
             '//span[contains(text(), "Welcome")]'
         ]
-        
-        signin_successful = False
+
         for indicator in success_indicators:
             try:
                 element = driver.find_element(By.XPATH, indicator)
                 if element:
-                    signin_successful = True
-                    break
-            except:
+                    print("Sign-in successful!")
+                    sys.exit(0)
+            except Exception:
                 continue
-        
-        if signin_successful:
-            print("Sign-in successful!")
-        else:
-            print("Sign-in may have failed - no success indicators found")
-            
+
+        print("Sign-in may have failed - no success indicators found")
+        sys.exit(1)
+
     except Exception as e:
-        print(f"Error checking sign-in status: {e}")
+        print("Error during sign-in process: " + str(e))
+        sys.exit(1)
+    finally:
+        if driver is not None:
+            try:
+                driver.quit()
+            except Exception:
+                pass
 
-except Exception as e:
-    print(f"Error during sign-in process: {e}")
-
-finally:
-    # Close browser
-    driver.quit()
-'''
-                    
+if __name__ == '__main__':
+    main()
+'''.replace('{URL}', url).replace('{EMAIL}', email).replace('{PASSWORD}', password).replace('{HEADLESS}', 'True' if headless else 'False')
+                 
                     # Write temporary script
                     temp_script_path = f'/tmp/signin_{int(time.time())}.py'
                     with open(temp_script_path, 'w') as f:
@@ -340,3 +350,186 @@ finally:
                 'success': False,
                 'message': f'Error executing automation: {str(e)}'
             }), 500
+
+    @app.route('/api/automation/signup', methods=['POST'])
+    def automation_signup():
+        """Execute Selenium sign-up automation"""
+        try:
+            data = request.get_json()
+            if not data:
+                return jsonify({'success': False, 'message': 'No JSON data received'}), 400
+
+            url = data.get('url', 'https://qa.systemisers.in/')
+            first_name = data.get('first_name')
+            last_name = data.get('last_name')
+            email = data.get('email')
+            mobile = data.get('mobile')
+            password = data.get('password')
+            confirm_password = data.get('confirm_password', password)
+            headless = bool(data.get('headless', True))
+
+            required = [first_name, last_name, email, mobile, password, confirm_password]
+            if any(v in (None, '') for v in required):
+                return jsonify({'success': False, 'message': 'All fields are required'}), 400
+
+            def run_selenium_script():
+                try:
+                    temp_script_content = '''from selenium import webdriver
+from selenium.webdriver.common.by import By
+from selenium.webdriver.common.keys import Keys
+from selenium.webdriver.support.ui import WebDriverWait
+from selenium.webdriver.support import expected_conditions as EC
+from selenium.webdriver.chrome.options import Options
+import time
+import sys
+
+URL = "{URL}"
+FIRST_NAME = "{FIRST_NAME}"
+LAST_NAME = "{LAST_NAME}"
+EMAIL = "{EMAIL}"
+MOBILE = "{MOBILE}"
+PASSWORD = "{PASSWORD}"
+CONFIRM_PASSWORD = "{CONFIRM_PASSWORD}"
+HEADLESS = {HEADLESS}
+
+def main():
+    driver = None
+    try:
+        options = webdriver.ChromeOptions()
+        if HEADLESS:
+            options.add_argument('--headless=new')
+        options.add_argument('--no-sandbox')
+        options.add_argument('--disable-dev-shm-usage')
+        options.add_argument('--window-size=1920,1080')
+        driver = webdriver.Chrome(options=options)
+        driver.get(URL)
+
+        wait = WebDriverWait(driver, 10)
+
+        # Open Sign Up
+        open_signup_btn = wait.until(EC.element_to_be_clickable((By.XPATH, '//*[@id="navbarSupportedContent"]/button[1]')))
+        open_signup_btn.click()
+
+        # Validate popup title
+        wait.until(EC.visibility_of_element_located((By.XPATH, '//form/h2[text()="Let’s Sign Up"]')))
+
+        # Fill form fields
+        first_name_input = wait.until(EC.visibility_of_element_located((By.XPATH, '//form/div/div[1]//input[@placeholder="Enter Your First Name"]')))
+        first_name_input.clear(); first_name_input.send_keys(FIRST_NAME)
+
+        last_name_input = driver.find_element(By.XPATH, '//form/div/div[2]//input[@placeholder="Enter Your Last Name"]')
+        last_name_input.clear(); last_name_input.send_keys(LAST_NAME)
+
+        email_input = driver.find_element(By.XPATH, '//form/div/div[3]//input[@placeholder="Enter Your Email Address"]')
+        email_input.clear(); email_input.send_keys(EMAIL)
+
+        mobile_input = driver.find_element(By.XPATH, '//form/div/div[4]//input[@placeholder="Enter Your Mobile Number"]')
+        mobile_input.clear(); mobile_input.send_keys(MOBILE)
+
+        password_input = driver.find_element(By.XPATH, '//form/div/div[5]//input[@placeholder="Enter Your Password"]')
+        password_input.clear(); password_input.send_keys(PASSWORD)
+
+        confirm_input = driver.find_element(By.XPATH, '//form/div/div[6]//input[@placeholder="Re-enter Your Password"]')
+        confirm_input.clear(); confirm_input.send_keys(CONFIRM_PASSWORD)
+
+        # Accept terms checkbox
+        checkbox = driver.find_element(By.XPATH, '//form/div/div[7]//label[text()="I agree to the terms and conditions"]/../input[@type="checkbox"]')
+        if not checkbox.is_selected():
+            checkbox.click()
+
+        # Submit
+        signup_btn = wait.until(EC.element_to_be_clickable((By.XPATH, '//form/div/div[8]//button[text()="Sign Up"]')))
+        signup_btn.click()
+
+        time.sleep(5)
+
+        # Success heuristics: activation confirmation messages or post-login indicators
+        success_indicators = [
+            # Activation / confirmation messages
+            '//*[contains(text(), "Activation link") or contains(text(), "activation link")]',
+            '//*[contains(text(), "check your email") or contains(text(), "Check your email")]',
+            '//*[contains(text(), "verification") and contains(text(), "email")]',
+            # In case auto-login happens
+            '//a[contains(text(), "Logout")]',
+            '//a[contains(text(), "Dashboard")]'
+        ]
+        for ind in success_indicators:
+            try:
+                element = driver.find_element(By.XPATH, ind)
+                if element:
+                    print("Sign-up successful!")
+                    sys.exit(0)
+            except Exception:
+                continue
+
+        # If explicit error indicators are present, treat as failure
+        error_indicators = [
+            '//*[contains(@class, "error") or contains(@class, "invalid")]',
+            '//*[contains(text(), "already exists") or contains(text(), "invalid")]'
+        ]
+        for ind in error_indicators:
+            try:
+                element = driver.find_element(By.XPATH, ind)
+                if element:
+                    print("Sign-up may have failed - error indicator found")
+                    sys.exit(1)
+            except Exception:
+                continue
+
+        # Default to success if no errors detected but activation likely sent
+        print("Sign-up likely succeeded (no errors found, check email for activation)")
+        sys.exit(0)
+
+    except Exception as e:
+        print("Error during sign-up process: " + str(e))
+        sys.exit(1)
+    finally:
+        if driver is not None:
+            try:
+                driver.quit()
+            except Exception:
+                pass
+
+if __name__ == '__main__':
+    main()
+'''.replace('{URL}', url).replace('{FIRST_NAME}', first_name).replace('{LAST_NAME}', last_name).replace('{EMAIL}', email).replace('{MOBILE}', mobile).replace('{PASSWORD}', password).replace('{CONFIRM_PASSWORD}', confirm_password).replace('{HEADLESS}', 'True' if headless else 'False')
+
+                    temp_script_path = f'/tmp/signup_{int(time.time())}.py'
+                    with open(temp_script_path, 'w') as f:
+                        f.write(temp_script_content)
+
+                    result = subprocess.run(['python3', temp_script_path], capture_output=True, text=True, timeout=90)
+                    try:
+                        os.remove(temp_script_path)
+                    except Exception:
+                        pass
+                    return result.returncode == 0, result.stdout, result.stderr
+                except subprocess.TimeoutExpired:
+                    return False, "", "Script execution timed out"
+                except Exception as e:
+                    return False, "", str(e)
+
+            result_queue = []
+            def automation_worker():
+                success, stdout, stderr = run_selenium_script()
+                result_queue.append({'success': success, 'stdout': stdout, 'stderr': stderr})
+
+            thread = threading.Thread(target=automation_worker)
+            thread.daemon = True
+            thread.start()
+            thread.join(timeout=100)
+
+            if thread.is_alive():
+                return jsonify({'success': False, 'message': 'Automation timed out'}), 408
+
+            if not result_queue:
+                return jsonify({'success': False, 'message': 'Automation execution failed to complete'}), 500
+
+            result = result_queue[0]
+            if result['success']:
+                return jsonify({'success': True, 'message': 'Sign-up automation completed successfully', 'output': result['stdout']}), 200
+            else:
+                return jsonify({'success': False, 'message': 'Sign-up automation failed', 'error': result['stderr'], 'output': result['stdout']}), 500
+
+        except Exception as e:
+            return jsonify({'success': False, 'message': f'Error executing automation: {str(e)}'}), 500

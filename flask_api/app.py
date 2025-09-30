@@ -333,7 +333,7 @@ def get_report_mappings():
         ORDER BY created_at DESC
         LIMIT 100
         """
-        
+
         mappings = select_all(query)
         
         formatted_mappings = []

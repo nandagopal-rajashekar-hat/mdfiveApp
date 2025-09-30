@@ -16,7 +16,7 @@ def test_automation_api():
     }
     
     # API endpoint
-    url = "http://localhost:5000/api/automation/signin"
+    url = "http://127.0.0.1:5000/api/automation/signin"
     
     try:
         print("Testing automation API endpoint...")

@@ -1,10 +1,35 @@
-import React, { useState, useRef } from 'react';
+import React, { useEffect, useState, useRef } from 'react';
 import { Container, Row, Col, Card, Button, Alert, Form, Table, Modal } from 'react-bootstrap';
-import { FaFileExcel, FaSignInAlt, FaEye, FaEyeSlash, FaUpload, FaTrash } from 'react-icons/fa';
+import { FaFileExcel, FaSignInAlt, FaEye, FaEyeSlash, FaTrash } from 'react-icons/fa';
 import * as XLSX from 'xlsx';
 import SideBar from '../SideBar';
 
-// Define types locally to avoid import issues
+class PageErrorBoundary extends React.Component<{ children: React.ReactNode }, { hasError: boolean; error?: any }>{
+  constructor(props: { children: React.ReactNode }) {
+    super(props);
+    this.state = { hasError: false };
+  }
+  static getDerivedStateFromError(error: any) {
+    return { hasError: true, error };
+  }
+  componentDidCatch(error: any, info: any) {
+    console.error('Automation page render error:', error, info);
+  }
+  render() {
+    if (this.state.hasError) {
+      return (
+        <Container className="py-4">
+          <Alert variant="danger">
+            <div className="fw-bold mb-2">Automation page failed to render.</div>
+            <div style={{ whiteSpace: 'pre-wrap' }}>{String(this.state.error)}</div>
+          </Alert>
+        </Container>
+      );
+    }
+    return <>{this.props.children}</>;
+  }
+}
+
 interface Credential {
   id: string;
   email: string;
@@ -20,27 +45,35 @@ interface ExcelCredentialData {
   Description?: string;
 }
 
-interface SignInResult {
-  success: boolean;
-  message: string;
-  credential?: Credential;
-}
+// removed unused SignInResult
 
 const SignIn: React.FC = () => {
-  const [credentials, setCredentials] = useState<Credential[]>([]);
+  // Removed unused credentials state (Excel table now uses signInExcelCreds)
+  // const [credentials, setCredentials] = useState<Credential[]>([]);
   const [selectedCredential, setSelectedCredential] = useState<Credential | null>(null);
   const [showPassword, setShowPassword] = useState<{ [key: string]: boolean }>({});
   const [isSigningIn, setIsSigningIn] = useState(false);
   const [alert, setAlert] = useState<{ type: 'success' | 'danger' | 'warning'; message: string } | null>(null);
+  const [showResultModal, setShowResultModal] = useState(false);
+  const [resultTitle, setResultTitle] = useState<string>('');
+  const [resultOutput, setResultOutput] = useState<string>('');
+  const [resultError, setResultError] = useState<string>('');
   const [showCredentialModal, setShowCredentialModal] = useState(false);
-  const fileInputRef = useRef<HTMLInputElement>(null);
+  // removed unused file input ref
+  const [manualEmail, setManualEmail] = useState<string>('');
+  const [manualPassword, setManualPassword] = useState<string>('');
+  const [signinHeadless, setSigninHeadless] = useState<boolean>(true);
+  const signInFileRef = useRef<HTMLInputElement>(null);
+  const [signInExcelCreds, setSignInExcelCreds] = useState<Credential[]>([]);
 
-  const handleFileUpload = (event: React.ChangeEvent<HTMLInputElement>) => {
+  // Sign-up row typing is not required on this page
+
+  const handleSignInFileUpload = (event: React.ChangeEvent<HTMLInputElement>) => {
     const file = event.target.files?.[0];
     if (!file) return;
 
-    if (file.type !== 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet' && 
-        file.type !== 'application/vnd.ms-excel') {
+    if (file.type !== 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet' &&
+      file.type !== 'application/vnd.ms-excel') {
       setAlert({ type: 'danger', message: 'Please upload a valid Excel file (.xlsx or .xls)' });
       return;
     }
@@ -52,9 +85,9 @@ const SignIn: React.FC = () => {
         const workbook = XLSX.read(data, { type: 'array' });
         const sheetName = workbook.SheetNames[0];
         const worksheet = workbook.Sheets[sheetName];
-        const jsonData = XLSX.utils.sheet_to_json<ExcelCredentialData>(worksheet);
+        const jsonData = XLSX.utils.sheet_to_json<any>(worksheet);
 
-        const parsedCredentials: Credential[] = jsonData.map((row, index) => ({
+        const parsedCredentials: Credential[] = jsonData.map((row: ExcelCredentialData, index: number) => ({
           id: `credential-${Date.now()}-${index}`,
           email: row.Email || '',
           password: row.Password || '',
@@ -62,14 +95,16 @@ const SignIn: React.FC = () => {
           description: row.Description || ''
         }));
 
-        setCredentials(parsedCredentials);
-        setAlert({ type: 'success', message: `Successfully loaded ${parsedCredentials.length} credentials from Excel file` });
+        setSignInExcelCreds(parsedCredentials);
+        setAlert({ type: 'success', message: `Loaded ${parsedCredentials.length} sign-in credentials` });
       } catch (error) {
         setAlert({ type: 'danger', message: 'Error reading Excel file. Please check the format.' });
       }
     };
     reader.readAsArrayBuffer(file);
   };
+
+  // Sign-up upload removed from this page (moved to dedicated SignUp page)
 
   const togglePasswordVisibility = (credentialId: string) => {
     setShowPassword(prev => ({
@@ -79,7 +114,7 @@ const SignIn: React.FC = () => {
   };
 
   const deleteCredential = (credentialId: string) => {
-    setCredentials(prev => prev.filter(cred => cred.id !== credentialId));
+    setSignInExcelCreds(prev => prev.filter((cred: Credential) => cred.id !== credentialId));
     setAlert({ type: 'warning', message: 'Credential deleted successfully' });
   };
 
@@ -95,8 +130,7 @@ const SignIn: React.FC = () => {
     setAlert(null);
 
     try {
-      // Call the Flask API endpoint
-      const response = await fetch('http://localhost:5001/api/automation/signin', {
+      const response = await fetch('http://127.0.0.1:5000/api/automation/signin', {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
@@ -104,23 +138,94 @@ const SignIn: React.FC = () => {
         body: JSON.stringify({
           email: selectedCredential.email,
           password: selectedCredential.password,
-          url: 'https://qa.systemisers.in/'
+          url: 'https://qa.systemisers.in/',
+          headless: signinHeadless
         })
       });
 
-      if (response.ok) {
-        const result: SignInResult = await response.json();
-        setAlert({ type: 'success', message: result.message });
+      const resultJson = await response.json().catch(() => null);
+      const success = response.ok && resultJson && resultJson.success;
+
+      if (success) {
+        setAlert({ type: 'success', message: resultJson.message || 'Sign-in automation completed successfully' });
+        setResultTitle('Automation Output');
+        setResultOutput((resultJson.output ?? '').toString());
+        setResultError('');
+        setShowResultModal(true);
       } else {
-        setAlert({ type: 'danger', message: 'Sign-in failed. Please check your credentials.' });
+        const errorMessage = (resultJson && (resultJson.message || resultJson.error)) || 'Sign-in failed. Please check your credentials.';
+        setAlert({ type: 'danger', message: errorMessage });
+        setResultTitle('Automation Result');
+        setResultOutput(((resultJson && resultJson.output) ?? '').toString());
+        setResultError(((resultJson && resultJson.error) ?? '').toString());
+        setShowResultModal(true);
       }
     } catch (error) {
       setAlert({ type: 'danger', message: 'Error during sign-in process. Please try again.' });
+      setResultTitle('Automation Error');
+      setResultOutput('');
+      setResultError((error as Error).message);
+      setShowResultModal(true);
     } finally {
       setIsSigningIn(false);
       setShowCredentialModal(false);
     }
   };
+
+  const executeManualSignIn = async (email: string, password: string) => {
+    if (!email || !password) {
+      setAlert({ type: 'danger', message: 'Email and password are required' });
+      return;
+    }
+    setIsSigningIn(true);
+    setAlert(null);
+    try {
+      const response = await fetch('http://127.0.0.1:5000/api/automation/signin', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ email, password, url: 'https://qa.systemisers.in/', headless: signinHeadless })
+      });
+      const resultJson = await response.json().catch(() => null);
+      const success = response.ok && resultJson && resultJson.success;
+      if (success) {
+        setAlert({ type: 'success', message: resultJson.message || 'Sign-in automation completed successfully' });
+        setResultTitle('Automation Output');
+        setResultOutput((resultJson.output ?? '').toString());
+        setResultError('');
+      } else {
+        const errorMessage = (resultJson && (resultJson.message || resultJson.error)) || 'Sign-in failed.';
+        setAlert({ type: 'danger', message: errorMessage });
+        setResultTitle('Automation Result');
+        setResultOutput(((resultJson && resultJson.output) ?? '').toString());
+        setResultError(((resultJson && resultJson.error) ?? '').toString());
+      }
+      setShowResultModal(true);
+    } catch (error) {
+      setAlert({ type: 'danger', message: 'Error during sign-in process. Please try again.' });
+      setResultTitle('Automation Error');
+      setResultOutput('');
+      setResultError((error as Error).message);
+      setShowResultModal(true);
+    } finally {
+      setIsSigningIn(false);
+    }
+  };
+
+  useEffect(() => {
+    const params = new URLSearchParams(window.location.search);
+    const urlEmail = params.get('email');
+    const urlPassword = params.get('password');
+    const auto = params.get('auto');
+    if (auto === 'true' && urlEmail && urlPassword) {
+      setManualEmail(urlEmail);
+      setManualPassword(urlPassword);
+      executeManualSignIn(urlEmail, urlPassword);
+    }
+  }, []);
+
+  // Sign-up execution removed from this page (use /automation/signup)
+
+  // Sign-up per-row execution removed from this page (use /automation/signup)
 
   const downloadSampleExcel = () => {
     const sampleData = [
@@ -135,7 +240,7 @@ const SignIn: React.FC = () => {
   };
 
   return (
-    <>
+    <PageErrorBoundary>
       <Row>
         <Col md={2}>
           <SideBar />
@@ -162,168 +267,145 @@ const SignIn: React.FC = () => {
                       </Alert>
                     )}
 
-                    {/* File Upload Section */}
+                    {/* Manual Trigger Section */}
                     <Row className="mb-4">
                       <Col md={6}>
                         <Card>
                           <Card.Header>
-                            <h5>Upload Credentials from Excel</h5>
+                            <div className="d-flex align-items-center justify-content-between">
+                              <h5 className="mb-0">Quick Automation</h5>
+                              <Form.Check
+                                type="switch"
+                                id="headless-switch"
+                                label="Headless"
+                                checked={signinHeadless}
+                                onChange={(e) => setSigninHeadless(e.target.checked)}
+                              />
+                            </div>
                           </Card.Header>
                           <Card.Body>
                             <Form.Group className="mb-3">
-                              <Form.Label>Select Excel File</Form.Label>
-                              <Form.Control
-                                type="file"
-                                accept=".xlsx,.xls"
-                                onChange={handleFileUpload}
-                                ref={fileInputRef}
-                              />
-                              <Form.Text className="text-muted">
-                                Upload an Excel file with columns: Email, Password, Name (optional), Description (optional)
-                              </Form.Text>
+                              <Form.Label>Email</Form.Label>
+                              <Form.Control type="email" value={manualEmail} onChange={(e) => setManualEmail(e.target.value)} placeholder="Enter email" />
                             </Form.Group>
-                            <Button 
-                              variant="primary" 
-                              onClick={() => fileInputRef.current?.click()}
-                              disabled={isSigningIn}
-                            >
-                              <FaUpload className="me-2" />
-                              Choose File
-                            </Button>
+                            <Form.Group className="mb-3">
+                              <Form.Label>Password</Form.Label>
+                              <Form.Control type="password" value={manualPassword} onChange={(e) => setManualPassword(e.target.value)} placeholder="Enter password" />
+                            </Form.Group>
+                            <div className="d-flex gap-2">
+                              <Button variant="success" disabled={isSigningIn} onClick={() => executeManualSignIn(manualEmail, manualPassword)}>
+                                {isSigningIn ? 'Running...' : 'Run Automation'}
+                              </Button>
+                              <Form.Text className="text-muted">Use this for quick testing with manual credentials</Form.Text>
+                            </div>
                           </Card.Body>
                         </Card>
                       </Col>
+
+                      {/* Excel Upload Section */}
                       <Col md={6}>
                         <Card>
                           <Card.Header>
-                            <h5>Instructions</h5>
+                            <h5 className="mb-0">Upload Excel Credentials</h5>
                           </Card.Header>
                           <Card.Body>
-                            <ol>
-                              <li>Download the sample Excel template</li>
-                              <li>Fill in your credentials (Email, Password, Name, Description)</li>
-                              <li>Upload the Excel file</li>
-                              <li>Select a credential and click Sign In</li>
-                            </ol>
-                            <Alert variant="info" className="mt-3">
-                              <strong>Note:</strong> The system will use Selenium automation to sign in to the target website.
-                            </Alert>
-                          </Card.Body>
-                        </Card>
-                      </Col>
-                    </Row>
-
-                    {/* Credentials Table */}
-                    {credentials.length > 0 && (
-                      <Row>
-                        <Col md={12}>
-                          <Card>
-                            <Card.Header>
-                              <h5>Loaded Credentials ({credentials.length})</h5>
-                            </Card.Header>
-                            <Card.Body>
-                              <Table striped bordered hover responsive>
+                            <Form.Group>
+                              <Form.Label>Upload Excel file</Form.Label>
+                              <Form.Control type="file" accept=".xlsx,.xls" ref={signInFileRef} onChange={handleSignInFileUpload} />
+                            </Form.Group>
+                            {signInExcelCreds.length > 0 && (
+                              <Table striped bordered hover size="sm" className="mt-3">
                                 <thead>
                                   <tr>
-                                    <th>Name</th>
                                     <th>Email</th>
                                     <th>Password</th>
-                                    <th>Description</th>
-                                    <th>Actions</th>
+                                    <th>Name</th>
+                                    <th>Action</th>
                                   </tr>
                                 </thead>
                                 <tbody>
-                                  {credentials.map((credential) => (
-                                    <tr key={credential.id}>
-                                      <td>{credential.name}</td>
-                                      <td>{credential.email}</td>
+                                  {signInExcelCreds.map((cred) => (
+                                    <tr key={cred.id}>
+                                      <td>{cred.email}</td>
+                                      <td>{cred.password.replace(/./g, '*')}</td>
+                                      <td>{cred.name}</td>
                                       <td>
-                                        <div className="d-flex align-items-center">
-                                          <span className="me-2">
-                                            {showPassword[credential.id] 
-                                              ? credential.password 
-                                              : '•'.repeat(credential.password.length)
-                                            }
-                                          </span>
-                                          <Button
-                                            variant="outline-secondary"
-                                            size="sm"
-                                            onClick={() => togglePasswordVisibility(credential.id)}
-                                          >
-                                            {showPassword[credential.id] ? <FaEyeSlash /> : <FaEye />}
-                                          </Button>
-                                        </div>
-                                      </td>
-                                      <td>{credential.description}</td>
-                                      <td>
-                                        <div className="d-flex gap-2">
-                                          <Button
-                                            variant="success"
-                                            size="sm"
-                                            onClick={() => selectCredential(credential)}
-                                            disabled={isSigningIn}
-                                          >
-                                            <FaSignInAlt className="me-1" />
-                                            Sign In
-                                          </Button>
-                                          <Button
-                                            variant="danger"
-                                            size="sm"
-                                            onClick={() => deleteCredential(credential.id)}
-                                          >
-                                            <FaTrash />
-                                          </Button>
-                                        </div>
+                                        <Button size="sm" variant="primary" onClick={() => selectCredential(cred)}>
+                                          Run
+                                        </Button>
+                                        <Button size="sm" variant="danger" className="ms-2" onClick={() => deleteCredential(cred.id)}>
+                                          <FaTrash />
+                                        </Button>
                                       </td>
                                     </tr>
                                   ))}
                                 </tbody>
                               </Table>
-                            </Card.Body>
-                          </Card>
-                        </Col>
-                      </Row>
-                    )}
+                            )}
+                          </Card.Body>
+                        </Card>
+                      </Col>
+                    </Row>
+
+                    {/* Sign-Up UI moved to dedicated page at /automation/signup */}
                   </Card.Body>
                 </Card>
               </Col>
             </Row>
-
-            {/* Sign In Confirmation Modal */}
-            <Modal show={showCredentialModal} onHide={() => setShowCredentialModal(false)}>
-              <Modal.Header closeButton>
-                <Modal.Title>Confirm Sign-In</Modal.Title>
-              </Modal.Header>
-              <Modal.Body>
-                {selectedCredential && (
-                  <div>
-                    <p><strong>Name:</strong> {selectedCredential.name}</p>
-                    <p><strong>Email:</strong> {selectedCredential.email}</p>
-                    <p><strong>Description:</strong> {selectedCredential.description}</p>
-                    <Alert variant="warning">
-                      <strong>Warning:</strong> This will trigger automated sign-in using Selenium. 
-                      Make sure you have the necessary permissions and the target website is accessible.
-                    </Alert>
-                  </div>
-                )}
-              </Modal.Body>
-              <Modal.Footer>
-                <Button variant="secondary" onClick={() => setShowCredentialModal(false)}>
-                  Cancel
-                </Button>
-                <Button 
-                  variant="primary" 
-                  onClick={executeSignIn}
-                  disabled={isSigningIn}
-                >
-                  {isSigningIn ? 'Signing In...' : 'Confirm Sign-In'}
-                </Button>
-              </Modal.Footer>
-            </Modal>
           </Container>
+
+          {/* Credential Modal */}
+          <Modal show={showCredentialModal} onHide={() => setShowCredentialModal(false)}>
+            <Modal.Header closeButton>
+              <Modal.Title>Credential Details</Modal.Title>
+            </Modal.Header>
+            <Modal.Body>
+              {selectedCredential && (
+                <>
+                  <p><strong>Email:</strong> {selectedCredential.email}</p>
+                  <p><strong>Password:</strong> {showPassword[selectedCredential.id] ? selectedCredential.password : '********'}</p>
+                  <p><strong>Name:</strong> {selectedCredential.name}</p>
+                  <p><strong>Description:</strong> {selectedCredential.description}</p>
+                  <Button variant="outline-secondary" onClick={() => togglePasswordVisibility(selectedCredential.id)} className="me-2">
+                    {showPassword[selectedCredential.id] ? <FaEyeSlash /> : <FaEye />}
+                  </Button>
+                </>
+              )}
+            </Modal.Body>
+            <Modal.Footer>
+              <Button variant="secondary" onClick={() => setShowCredentialModal(false)}>Close</Button>
+              <Button variant="primary" disabled={isSigningIn} onClick={executeSignIn}>
+                {isSigningIn ? 'Signing In...' : 'Sign In'}
+              </Button>
+            </Modal.Footer>
+          </Modal>
+
+          {/* Result Modal */}
+          <Modal show={showResultModal} onHide={() => setShowResultModal(false)} size="lg">
+            <Modal.Header closeButton>
+              <Modal.Title>{resultTitle}</Modal.Title>
+            </Modal.Header>
+            <Modal.Body>
+              {resultOutput && (
+                <div className="mb-3">
+                  <h6>Output:</h6>
+                  <pre className="bg-light p-2 rounded">{resultOutput}</pre>
+                </div>
+              )}
+              {resultError && (
+                <div className="mb-3">
+                  <h6>Error:</h6>
+                  <pre className="bg-light p-2 rounded text-danger">{resultError}</pre>
+                </div>
+              )}
+            </Modal.Body>
+            <Modal.Footer>
+              <Button variant="secondary" onClick={() => setShowResultModal(false)}>Close</Button>
+            </Modal.Footer>
+          </Modal>
         </Col>
       </Row>
-    </>
+    </PageErrorBoundary>
   );
 };
 
